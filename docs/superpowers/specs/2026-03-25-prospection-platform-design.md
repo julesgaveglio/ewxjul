@@ -58,9 +58,11 @@ Plateforme interne Next.js 14 pour 2 utilisateurs (Jules, Ewan). Trois modules :
 2. **Playwright** (async, en background) : audit du site existant du prospect. Mesure Lighthouse performance, responsive, HTTPS, meta tags.
 3. **Serper API** : nombre de pages indexées sur Google pour le domaine du prospect.
 
-### Scoring /100 (deux phases)
+### Scoring /100 (deux branches)
 
-**Phase 1 — Instantanée** (dès retour Places API) :
+Le scoring suit deux branches mutuellement exclusives selon la présence d'un site web. Le score est cappé à 100.
+
+**Branche A — Pas de site web :**
 
 | Critère | Points |
 |---|---|
@@ -68,8 +70,22 @@ Plateforme interne Next.js 14 pour 2 utilisateurs (Jules, Ewan). Trois modules :
 | +50 avis Google (business actif) | +10 |
 | Note Google > 4.0 | +5 |
 | Secteur prioritaire (resto, hôtel, artisan, commerce) | +5 |
+| Fiche Google incomplète | +10 |
+| Moins de 5 pages indexées (site: domain) | +10 |
 
-**Phase 2 — Asynchrone** (après audit Playwright) :
+Score max branche A = 80. `scoring_status` passe directement à `'complete'` (pas d'audit Playwright).
+
+**Branche B — Site web existant (Phase 1 instantanée + Phase 2 async) :**
+
+Phase 1 (instantanée) :
+
+| Critère | Points |
+|---|---|
+| +50 avis Google (business actif) | +10 |
+| Note Google > 4.0 | +5 |
+| Secteur prioritaire (resto, hôtel, artisan, commerce) | +5 |
+
+Phase 2 (audit Playwright async) :
 
 | Critère | Points |
 |---|---|
@@ -80,15 +96,30 @@ Plateforme interne Next.js 14 pour 2 utilisateurs (Jules, Ewan). Trois modules :
 | Moins de 5 pages indexées | +10 |
 | Fiche Google incomplète | +10 |
 
-Le score passe de `scoring_status: 'partial'` à `'complete'` une fois l'audit terminé.
+Score max branche B = 100. `scoring_status` passe de `'partial'` à `'complete'` après l'audit Playwright.
+
+Le score final est `Math.min(score, 100)`.
+
+### Google Places API — pagination
+
+Google Places API retourne max 20 résultats par requête (60 avec `next_page_token`). Le scan suit les `next_page_token` jusqu'à épuisement (max 60 résultats par recherche). L'insertion utilise `ON CONFLICT (google_maps_url) DO NOTHING` pour dédoublonner.
+
+### Concurrence
+
+- Max 1 scan job à la fois (vérification en base avant lancement)
+- Max 1 pipeline de génération de site à la fois (éviter surcharge Playwright)
+
+### Playwright — environnement d'exécution
+
+Playwright tourne en local (dev) et sur un serveur dédié (prod). Non compatible avec les serverless functions Vercel (taille binaire). En prod, les API Routes `/api/scan/analyze` et `/api/leads/[id]/generate` doivent tourner sur un serveur Node.js long-running (ex: VPS, Railway, Fly.io) ou être extraites en microservice séparé.
 
 ### Interface
 
 - Champ ville + champ catégorie
-- Bouton "Lancer le scan"
+- Bouton "Lancer le scan" (désactivé si un scan est déjà en cours)
 - Barre de progression temps réel (via polling ou Supabase Realtime sur `scraping_jobs.progress`)
 - Résultats affichés au fur et à mesure, avec score partiel puis complet
-- Les leads sont insérés automatiquement dans Supabase
+- Les leads sont insérés automatiquement dans Supabase (upsert)
 
 ### Données extraites par prospect
 
@@ -113,6 +144,7 @@ interface Lead {
   notes: string | null
   demo_url: string | null
   demo_status: 'idle' | 'scraping' | 'generating' | 'deploying' | 'deployed' | 'error'
+  demo_error_message: string | null
   demo_generated_at: string | null
   last_contact_at: string | null
   brand_data: BrandData | null
@@ -164,16 +196,23 @@ Supabase Realtime pour synchroniser les changements entre Jules et Ewan sans ref
 
 ```
 1. Clic "Générer" → demo_status = 'scraping'
+   - Si demo_status était 'error', reset à 'scraping' (retry autorisé)
 2. brand-scraper (Playwright) scrape le site existant, Google Maps, réseaux sociaux
+   - Si pas de site web : utilise Google Maps + recherche réseaux sociaux uniquement
+   - Fallback couleurs : palette par défaut selon le secteur si aucune couleur extraite
 3. Données structurées en JSON (BrandData) → stockées dans brand_data
 4. demo_status = 'generating'
 5. Appel Claude API (sonnet) avec le JSON + prompt système
 6. Claude retourne le code d'un site Next.js complet
-7. demo_status = 'deploying'
-8. Création fichiers en mémoire, upload via Vercel REST API (POST /v13/deployments)
-9. Récupération de l'URL de déploiement
-10. demo_status = 'deployed', demo_url = URL, demo_generated_at = now()
-11. En cas d'erreur à n'importe quelle étape : demo_status = 'error'
+7. Validation du code généré :
+   - Vérification présence fichiers requis (page.tsx, layout.tsx, package.json)
+   - Parsing syntaxique basique (pas d'erreurs de syntaxe JS/TS évidentes)
+   - Si validation échoue : retry Claude 1 fois, puis erreur
+8. demo_status = 'deploying'
+9. Création fichiers en mémoire, upload via Vercel REST API (POST /v13/deployments)
+10. Récupération de l'URL de déploiement
+11. demo_status = 'deployed', demo_url = URL, demo_generated_at = now()
+12. En cas d'erreur : demo_status = 'error', demo_error_message = description de l'erreur
 ```
 
 ### Scraping marque (BrandData)
@@ -240,6 +279,7 @@ Via l'API REST Vercel (`POST https://api.vercel.com/v13/deployments`) :
 CREATE TYPE lead_status AS ENUM ('to_call', 'contacted', 'demo_sent', 'sold', 'refused');
 CREATE TYPE demo_status AS ENUM ('idle', 'scraping', 'generating', 'deploying', 'deployed', 'error');
 CREATE TYPE scoring_status AS ENUM ('partial', 'complete');
+CREATE TYPE job_status AS ENUM ('pending', 'running', 'completed', 'error');
 
 -- Table leads
 CREATE TABLE leads (
@@ -262,10 +302,15 @@ CREATE TABLE leads (
   notes TEXT,
   demo_url TEXT,
   demo_status demo_status DEFAULT 'idle',
+  demo_error_message TEXT,
   demo_generated_at TIMESTAMPTZ,
   last_contact_at TIMESTAMPTZ,
-  brand_data JSONB
+  brand_data JSONB,
+  CONSTRAINT assigned_to_check CHECK (assigned_to IN ('jules', 'ewan'))
 );
+
+-- Dédoublonnage par URL Google Maps
+CREATE UNIQUE INDEX leads_google_maps_url_unique ON leads (google_maps_url) WHERE google_maps_url IS NOT NULL;
 
 -- Table scraping_jobs
 CREATE TABLE scraping_jobs (
@@ -273,7 +318,7 @@ CREATE TABLE scraping_jobs (
   created_at TIMESTAMPTZ DEFAULT now(),
   query_city TEXT NOT NULL,
   query_sector TEXT NOT NULL,
-  status TEXT DEFAULT 'pending',  -- 'pending' | 'running' | 'completed' | 'error'
+  status job_status DEFAULT 'pending',
   progress INTEGER DEFAULT 0,
   leads_found INTEGER DEFAULT 0,
   leads_added INTEGER DEFAULT 0,
@@ -290,6 +335,8 @@ CREATE POLICY "Authenticated users can insert leads"
   ON leads FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "Authenticated users can update leads"
   ON leads FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "Authenticated users can delete leads"
+  ON leads FOR DELETE TO authenticated USING (true);
 
 CREATE POLICY "Authenticated users can read jobs"
   ON scraping_jobs FOR SELECT TO authenticated USING (true);
@@ -374,3 +421,5 @@ SERPER_API_KEY=
 - Multi-tenant / plus de 2 utilisateurs
 - Facturation / devis automatique
 - App mobile native
+- Nettoyage automatique des projets Vercel (leads refusés/stales)
+- Scraping PagesJaunes (complexe, fragile — à évaluer en v2)
