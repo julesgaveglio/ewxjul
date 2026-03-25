@@ -73,6 +73,46 @@ async function runScan(db: any, jobId: string, city: string, sector: string) {
       await db.from('scraping_jobs').update({ progress, leads_added: leadsAdded }).eq('id', jobId)
     }
 
+    // Trigger async audit for leads with websites
+    const { data: leadsWithSites } = await db
+      .from('leads')
+      .select('*')
+      .eq('scoring_status', 'partial')
+      .not('website_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (leadsWithSites) {
+      for (const lead of leadsWithSites) {
+        try {
+          const domain = new URL(lead.website_url).hostname
+          const { analyzeSite } = await import('@/lib/scraper/site-analyzer')
+          const audit = await analyzeSite(lead.website_url, domain)
+
+          const { calculateScore } = await import('@/lib/scoring')
+          const scoreResult = calculateScore(
+            {
+              website_url: lead.website_url,
+              google_rating: lead.google_rating,
+              google_reviews_count: lead.google_reviews_count,
+              sector: lead.sector,
+              google_maps_url: lead.google_maps_url,
+              googleProfileComplete: !!(lead.phone && lead.address),
+              indexedPages: audit.indexedPages,
+            },
+            audit
+          )
+
+          await db.from('leads').update({
+            score: scoreResult.score,
+            scoring_status: 'complete',
+          }).eq('id', lead.id)
+        } catch (e) {
+          console.error(`Audit failed for lead ${lead.id}:`, e)
+        }
+      }
+    }
+
     await db.from('scraping_jobs').update({ status: 'completed', progress: 100, leads_added: leadsAdded }).eq('id', jobId)
   } catch (error: any) {
     await db.from('scraping_jobs').update({ status: 'error', error_message: error.message }).eq('id', jobId)
