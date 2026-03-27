@@ -61,6 +61,12 @@ export interface BrandData {
   }>
 }
 
+export interface ScanLogEntry {
+  time: string
+  message: string
+  type: 'info' | 'success' | 'error' | 'analyzing'
+}
+
 export interface ScrapingJob {
   id: string
   created_at: string
@@ -71,4 +77,6 @@ export interface ScrapingJob {
   leads_found: number
   leads_added: number
   error_message: string | null
+  current_action: string | null
+  logs: ScanLogEntry[] | null
 }

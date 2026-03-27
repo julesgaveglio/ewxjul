@@ -10,10 +10,19 @@ export default function LoginPage() {
   async function handleSubmit(formData: FormData) {
     setLoading(true)
     setError(null)
-    const result = await login(formData)
-    if (result?.error) {
-      setError(result.error)
-      setLoading(false)
+    try {
+      const result = await login(formData)
+      if (result?.error) {
+        setError(result.error)
+        setLoading(false)
+      }
+    } catch (e: unknown) {
+      // Next.js redirect throws internally — ignore it
+      const msg = e instanceof Error ? e.message : String(e)
+      if (!msg.includes('NEXT_REDIRECT')) {
+        setError(msg)
+        setLoading(false)
+      }
     }
   }
 

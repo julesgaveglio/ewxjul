@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { BrandData } from '@/lib/types/database'
 
 const SYSTEM_PROMPT = `Tu es un expert développeur Next.js et designer UI/UX.
@@ -38,21 +38,18 @@ interface GenerationResult {
 const REQUIRED_FILES = ['package.json', 'app/page.tsx', 'app/layout.tsx']
 
 export async function generateSite(brandData: BrandData): Promise<GenerationResult> {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
-
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 16000,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: `Voici les données de la marque :\n\n${JSON.stringify(brandData, null, 2)}\n\nGénère le site.`,
-      },
-    ],
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-pro-preview-03-25',
+    systemInstruction: SYSTEM_PROMPT,
+    generationConfig: { maxOutputTokens: 16000 },
   })
 
-  const text = message.content[0].type === 'text' ? message.content[0].text : ''
+  const userPrompt = `Voici les données de la marque :\n\n${JSON.stringify(brandData, null, 2)}\n\nGénère le site.`
+
+  const response = await model.generateContent(userPrompt)
+  const text = response.response.text()
+
   let result: GenerationResult
 
   try {
@@ -60,7 +57,7 @@ export async function generateSite(brandData: BrandData): Promise<GenerationResu
   } catch {
     // Try extracting JSON from potential markdown wrapper
     const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error('Claude n\'a pas retourné un JSON valide')
+    if (!jsonMatch) throw new Error('Gemini n\'a pas retourné un JSON valide')
     result = JSON.parse(jsonMatch[0])
   }
 
@@ -69,25 +66,19 @@ export async function generateSite(brandData: BrandData): Promise<GenerationResu
   const missing = REQUIRED_FILES.filter(f => !filePaths.includes(f))
 
   if (missing.length > 0) {
-    // Retry once
-    const retryMessage = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `Voici les données de la marque :\n\n${JSON.stringify(brandData, null, 2)}\n\nGénère le site.`,
-        },
-        { role: 'assistant', content: text },
-        {
-          role: 'user',
-          content: `Il manque les fichiers suivants : ${missing.join(', ')}. Régénère le JSON complet avec TOUS les fichiers.`,
-        },
+    // Retry once with chat history
+    const chat = model.startChat({
+      history: [
+        { role: 'user', parts: [{ text: userPrompt }] },
+        { role: 'model', parts: [{ text }] },
       ],
     })
 
-    const retryText = retryMessage.content[0].type === 'text' ? retryMessage.content[0].text : ''
+    const retryResponse = await chat.sendMessage(
+      `Il manque les fichiers suivants : ${missing.join(', ')}. Régénère le JSON complet avec TOUS les fichiers.`
+    )
+    const retryText = retryResponse.response.text()
+
     try {
       result = JSON.parse(retryText)
     } catch {

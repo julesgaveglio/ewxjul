@@ -11,11 +11,7 @@ export async function analyzeSite(websiteUrl: string, domain: string): Promise<S
     auditWithPlaywright(websiteUrl),
     checkIndexedPages(domain),
   ])
-
-  return {
-    ...browserAudit,
-    indexedPages,
-  }
+  return { ...browserAudit, indexedPages }
 }
 
 async function auditWithPlaywright(url: string): Promise<Omit<SiteAuditResult, 'indexedPages'>> {
@@ -23,37 +19,45 @@ async function auditWithPlaywright(url: string): Promise<Omit<SiteAuditResult, '
   const browser = await chromium.launch({ headless: true })
 
   try {
-    const page = await browser.newPage()
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (compatible; SiteAuditor/1.0)',
+    })
+    const page = await context.newPage()
 
-    // Check HTTPS
     const hasHttps = url.startsWith('https://')
 
-    // Load page and measure performance
+    // Load with timeout — skip if site is too slow
     const startTime = Date.now()
-    await page.goto(url, { waitUntil: 'load', timeout: 30000 })
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 })
+    } catch {
+      // Site unreachable or too slow → still return what we know
+      return { isResponsive: false, lighthouseScore: 0, hasHttps, hasMetaTags: false }
+    }
     const loadTime = Date.now() - startTime
 
-    // Simple performance score based on load time (rough Lighthouse approximation)
+    // Performance score based on load time
     let lighthouseScore: number
-    if (loadTime < 2000) lighthouseScore = 90 + Math.round((2000 - loadTime) / 200)
-    else if (loadTime < 4000) lighthouseScore = 60 + Math.round((4000 - loadTime) / 67)
-    else if (loadTime < 6000) lighthouseScore = 30 + Math.round((6000 - loadTime) / 67)
-    else lighthouseScore = Math.max(0, 30 - Math.round((loadTime - 6000) / 200))
+    if (loadTime < 1500) lighthouseScore = 90
+    else if (loadTime < 3000) lighthouseScore = 70
+    else if (loadTime < 5000) lighthouseScore = 50
+    else if (loadTime < 8000) lighthouseScore = 30
+    else lighthouseScore = 10
 
-    // Check responsive
+    // Mobile responsiveness
     await page.setViewportSize({ width: 375, height: 812 })
-    await page.waitForTimeout(1000)
-    const mobileWidth = await page.evaluate(() => document.documentElement.scrollWidth)
-    const isResponsive = mobileWidth <= 400
+    await page.waitForTimeout(500)
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth).catch(() => 800)
+    const isResponsive = scrollWidth <= 420
 
-    // Check meta tags
+    // Meta tags
     const hasMetaTags = await page.evaluate(() => {
-      const title = document.querySelector('title')
-      const description = document.querySelector('meta[name="description"]')
-      return !!(title?.textContent && description?.getAttribute('content'))
-    })
+      const title = document.querySelector('title')?.textContent?.trim()
+      const desc = document.querySelector('meta[name="description"]')?.getAttribute('content')?.trim()
+      return !!(title && title.length > 3 && desc && desc.length > 10)
+    }).catch(() => false)
 
-    return { isResponsive, lighthouseScore: Math.min(lighthouseScore, 100), hasHttps, hasMetaTags }
+    return { isResponsive, lighthouseScore, hasHttps, hasMetaTags }
   } finally {
     await browser.close()
   }
@@ -67,12 +71,13 @@ async function checkIndexedPages(domain: string): Promise<number> {
         'X-API-KEY': process.env.SERPER_API_KEY!,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ q: `site:${domain}`, gl: 'fr' }),
+      body: JSON.stringify({ q: `site:${domain}`, gl: 'fr', num: 10 }),
     })
-
     if (!response.ok) return 0
     const data = await response.json()
-    return data.organic?.length ?? 0
+    return data.searchInformation?.totalResults
+      ? parseInt(data.searchInformation.totalResults.replace(/\D/g, ''), 10)
+      : (data.organic?.length ?? 0)
   } catch {
     return 0
   }
