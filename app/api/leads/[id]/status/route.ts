@@ -8,7 +8,7 @@ export async function GET(
   const db = createServiceClient()
   const { data, error } = await db
     .from('leads')
-    .select('demo_status, demo_url, owner_name, cold_pitch')
+    .select('demo_status, demo_url, owner_name, brand_data')
     .eq('id', params.id)
     .single()
 

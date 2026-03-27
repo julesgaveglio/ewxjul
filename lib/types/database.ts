@@ -29,7 +29,6 @@ export interface Lead {
   last_contact_at: string | null
   brand_data: BrandData | null
   owner_name: string | null
-  cold_pitch: string | null
 }
 
 export interface BrandData {

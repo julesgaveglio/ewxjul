@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { scrapeBrand } from '@/lib/scraper/brand-scraper'
 import { findOwnerName } from '@/lib/scraper/owner-finder'
-import { generateColdPitch } from '@/lib/generator/pitch'
 
 export async function POST(
   _request: NextRequest,
@@ -16,7 +15,6 @@ export async function POST(
   const { data: lead, error } = await db.from('leads').select('*').eq('id', params.id).single()
   if (error || !lead) return NextResponse.json({ error: 'Lead non trouvé' }, { status: 404 })
 
-  // Mark as enriching
   await db.from('leads').update({ demo_status: 'scraping' }).eq('id', params.id)
 
   runEnrich(db, params.id, lead).catch(console.error)
@@ -30,25 +28,10 @@ async function runEnrich(db: any, leadId: string, lead: any) {
       findOwnerName(lead.company_name, lead.city, lead.siret ?? null),
     ])
 
-    const issues: string[] = []
-    if (!lead.website_url) issues.push('aucun site internet')
-
-    const coldPitch = await generateColdPitch({
-      ownerName,
-      companyName: lead.company_name,
-      sector: lead.sector,
-      city: lead.city,
-      googleRating: lead.google_rating,
-      reviewsCount: lead.google_reviews_count,
-      websiteUrl: lead.website_url,
-      issues,
-    })
-
     await db.from('leads').update({
       demo_status: 'idle',
       brand_data: brandData,
       owner_name: ownerName,
-      cold_pitch: coldPitch,
     }).eq('id', leadId)
 
   } catch (err: any) {
