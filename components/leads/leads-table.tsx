@@ -82,6 +82,7 @@ export function LeadsTable({ leads }: LeadsTableProps) {
             <th className="px-4 py-3 font-medium">Secteur</th>
             <th className="px-4 py-3 font-medium">Ville</th>
             <th className="px-4 py-3 font-medium">Téléphone</th>
+            <th className="px-4 py-3 font-medium">Notes</th>
             <th className="px-4 py-3 font-medium">Statut</th>
             <th className="px-4 py-3 font-medium">Assigné</th>
             <th className="px-4 py-3 font-medium text-center">Enrichir</th>
@@ -119,6 +120,12 @@ export function LeadsTable({ leads }: LeadsTableProps) {
                 <td className="px-4 py-3">
                   {lead.phone
                     ? <a href={`tel:${lead.phone}`} className="flex items-center gap-1 text-accent hover:underline"><Phone size={14} />{lead.phone}</a>
+                    : <span className="text-text-secondary">—</span>}
+                </td>
+
+                <td className="px-4 py-3 max-w-[200px]">
+                  {lead.notes
+                    ? <p className="text-xs text-text-secondary line-clamp-2">{lead.notes}</p>
                     : <span className="text-text-secondary">—</span>}
                 </td>
 
