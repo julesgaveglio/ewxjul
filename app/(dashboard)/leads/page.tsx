@@ -1,5 +1,7 @@
 'use client'
 
+export const dynamic = 'force-dynamic'
+
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { LeadsFilters, type FiltersState } from '@/components/leads/leads-filters'
@@ -59,8 +61,6 @@ export default function LeadsPage() {
     })
   }, [leads, filters])
 
-  const supabase = createClient()
-
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Leads</h1>
@@ -69,7 +69,7 @@ export default function LeadsPage() {
         <LeadsTable leads={filteredLeads} />
       ) : (
         <KanbanBoard leads={filteredLeads} onLeadUpdate={() => {
-          supabase.from('leads').select('*').order('score', { ascending: false }).then(({ data }) => {
+          createClient().from('leads').select('*').order('score', { ascending: false }).then(({ data }) => {
             if (data) setLeads(data)
           })
         }} />
