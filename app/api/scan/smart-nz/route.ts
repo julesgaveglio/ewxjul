@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { runSmartScan } from '@/lib/pipeline/smart-scan'
+import { runSmartScanNZ } from '@/lib/pipeline/smart-scan-nz'
 import type { LogFn } from '@/lib/pipeline/smart-scan'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const db = createServiceClient()
 
@@ -18,24 +18,21 @@ export async function POST(request: NextRequest) {
     .limit(1)
 
   if (runningJobs && runningJobs.length > 0) {
-    return NextResponse.json({ error: 'Un scan est déjà en cours' }, { status: 409 })
+    return NextResponse.json({ error: 'A scan is already running' }, { status: 409 })
   }
 
-  // Parse options from request body
   const body = await request.json().catch(() => ({}))
   const options = {
     sectorCount: body.sectorCount ?? 10,
     auditSites: body.auditSites ?? true,
-    enrichWithPappers: body.enrichWithPappers ?? true,
     enrichWithHunter: body.enrichWithHunter ?? true,
   }
 
-  // Create job
   const { data: job, error: jobError } = await db
     .from('scraping_jobs')
     .insert({
-      query_city: 'Multi-villes',
-      query_sector: 'Smart Scan',
+      query_city: 'Multi-cities NZ',
+      query_sector: 'Smart Scan 🇳🇿',
       status: 'running',
       progress: 0,
       logs: [],
@@ -44,11 +41,10 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (jobError || !job) {
-    return NextResponse.json({ error: `Erreur création job: ${jobError?.message ?? 'job null'}` }, { status: 500 })
+    return NextResponse.json({ error: `Job creation error: ${jobError?.message ?? 'job null'}` }, { status: 500 })
   }
 
-  // Run asynchronously
-  runSmartScanJob(db, job.id, options).catch(console.error)
+  runSmartScanNZJob(db, job.id, options).catch(console.error)
   return NextResponse.json({ job_id: job.id })
 }
 
@@ -57,7 +53,6 @@ export async function POST(request: NextRequest) {
 async function makeLogger(db: ReturnType<typeof createServiceClient>, jobId: string): Promise<LogFn> {
   return async (message, type = 'info', extra) => {
     if (!message) {
-      // Progress-only update
       if (extra) {
         await db.from('scraping_jobs').update(extra).eq('id', jobId)
       }
@@ -74,24 +69,23 @@ async function makeLogger(db: ReturnType<typeof createServiceClient>, jobId: str
 
 // ─── Main job runner ───────────────────────────────────────────────────────────
 
-async function runSmartScanJob(
+async function runSmartScanNZJob(
   db: ReturnType<typeof createServiceClient>,
   jobId: string,
-  options: Parameters<typeof runSmartScan>[1],
+  options: Parameters<typeof runSmartScanNZ>[1],
 ) {
   const log = await makeLogger(db, jobId)
 
   try {
-    await log('🚀 Smart Scan démarré...', 'info', { progress: 2 })
+    await log('🚀 Smart Scan NZ started...', 'info', { progress: 2 })
 
-    const scoredLeads = await runSmartScan(log, options)
+    const scoredLeads = await runSmartScanNZ(log, options)
 
-    await log(`📥 Insertion de ${scoredLeads.length} leads...`, 'info', { progress: 96 })
+    await log(`📥 Inserting ${scoredLeads.length} leads...`, 'info', { progress: 96 })
 
     let inserted = 0
     let duplicates = 0
 
-    // Parallel inserts (20 concurrent) — much faster than sequential
     const insertResults = await Promise.allSettled(
       scoredLeads.map(lead => db.from('leads').insert({
         company_name: lead.company_name,
@@ -106,7 +100,7 @@ async function runSmartScanJob(
         score: lead.score,
         scoring_status: lead.scoring_status,
         status: 'to_call',
-        country: 'fr',
+        country: 'nz',
       }))
     )
     for (const r of insertResults) {
@@ -117,7 +111,7 @@ async function runSmartScanJob(
     }
 
     await log(
-      `✅ Smart Scan terminé — ${inserted} leads ajoutés · ${duplicates} doublons`,
+      `✅ NZ Scan complete — ${inserted} leads added · ${duplicates} duplicates`,
       'success',
       { progress: 100, leads_added: inserted, leads_found: scoredLeads.length }
     )
@@ -125,7 +119,7 @@ async function runSmartScanJob(
     await db.from('scraping_jobs').update({ status: 'completed' }).eq('id', jobId)
 
   } catch (err: any) {
-    await log(`✗ Erreur fatale : ${err.message}`, 'error')
+    await log(`✗ Fatal error: ${err.message}`, 'error')
     await db.from('scraping_jobs').update({
       status: 'error',
       error_message: err.message,

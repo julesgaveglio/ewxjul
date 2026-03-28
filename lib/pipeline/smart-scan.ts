@@ -17,12 +17,31 @@ import { getCachedAudit, setCachedAudit, shouldAudit } from './cache'
 // ─── Sectors & Cities ─────────────────────────────────────────────────────────
 
 const SECTORS = [
+  // 🥇 BTP & artisans — MEILLEURE NICHE (48% sans site, gros panier)
   'plombier', 'électricien', 'menuisier', 'maçon', 'peintre en bâtiment',
-  'coiffeur', 'institut de beauté', 'barbier',
-  'restaurant', 'boulangerie', 'boucherie', 'pizzeria', 'traiteur',
-  'garage automobile', 'carrosserie', 'vitrier', 'serrurier',
-  'fleuriste', 'photographe', 'agent immobilier', 'expert comptable',
-  'taxi', 'déménageur', 'nettoyage', 'pressing', 'cordonnerie',
+  'chauffagiste', 'couvreur', 'carreleur', 'charpentier', 'vitrier', 'serrurier',
+
+  // 🥈 Agriculture / producteurs locaux — BLUE OCEAN (65% sans site)
+  'maraîcher', 'producteur local', 'éleveur', 'ferme bio', 'viticulteur', 'apiculteur',
+
+  // Services à la personne (55% sans site, forte demande Google locale)
+  'aide à domicile', 'garde d\'enfants', 'auxiliaire de vie', 'jardinage à domicile',
+
+  // 🥉 Restaurants / hôtels — ARGENT RAPIDE
+  'restaurant', 'pizzeria', 'traiteur', 'brasserie', 'hôtel', 'gîte',
+
+  // Professions santé
+  'dentiste', 'kinésithérapeute', 'médecin généraliste', 'infirmier libéral',
+
+  // Artisans d'art (peu digitalisés, Instagram ≠ SEO)
+  'potier', 'céramiste', 'ébéniste', 'luthier', 'artisan d\'art',
+
+  // Services personnels
+  'coiffeur', 'institut de beauté', 'barbier', 'nail art',
+
+  // Commerce & autres
+  'fleuriste', 'boulangerie', 'garage automobile', 'carrosserie',
+  'photographe', 'agent immobilier', 'expert comptable',
 ]
 
 const CITIES = [
@@ -36,6 +55,26 @@ const CITIES = [
 
 function pickRandom<T>(arr: T[], n: number): T[] {
   return [...arr].sort(() => Math.random() - 0.5).slice(0, n)
+}
+
+// ─── Concurrency helper ───────────────────────────────────────────────────────
+// Runs fn over items with at most `concurrency` in-flight at once.
+
+export async function concurrentMap<T, R>(
+  items: T[],
+  fn: (item: T, index: number) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++
+      results[i] = await fn(items[i], i)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker))
+  return results
 }
 
 // ─── Log callback type ────────────────────────────────────────────────────────
@@ -53,63 +92,59 @@ export async function collectCompanies(
   cities: string[],
   log: LogFn,
 ): Promise<RawCompany[]> {
+  const pairs = Array.from(
+    { length: Math.min(sectors.length, cities.length) },
+    (_, i) => ({ sector: sectors[i], city: cities[i] }),
+  )
+
+  // Run all Serper calls in parallel (HTTP, no concurrency risk)
+  const serperBatches = await Promise.allSettled(
+    pairs.map(async ({ sector, city }) => {
+      const query = `${sector} ${city}`
+      const results = await searchGoogleMaps(query)
+      await log(`✓ Serper: ${results.length} résultats pour "${query}"`, 'success')
+      return { sector, city, results }
+    }),
+  )
+
   const all: RawCompany[] = []
 
-  for (let i = 0; i < Math.min(sectors.length, cities.length); i++) {
-    const sector = sectors[i]
-    const city = cities[i]
-    const query = `${sector} ${city}`
-
-    try {
-      // Source 1: Serper Google Maps (fast, reliable)
-      const serperResults = await searchGoogleMaps(query)
-      for (const p of serperResults) {
-        all.push({
-          name: p.name,
-          phone: p.phone,
-          address: p.address,
-          city,
-          sector,
-          naf_code: null,
-          siret: null,
-          website_url: p.website ?? null,
-          google_maps_url: p.googleMapsUrl,
-          google_rating: p.rating,
-          google_reviews_count: p.reviewsCount,
-          source: 'serper',
-        })
-      }
-      await log(`✓ Serper: ${serperResults.length} résultats pour "${query}"`, 'success')
-
-      // Source 2: Pages Jaunes (additional leads not on Google Maps)
-      try {
-        const pjResults = await scrapePagesJaunes(sector, city, 15)
-        for (const p of pjResults) {
-          all.push({
-            name: p.name,
-            phone: p.phone,
-            address: p.address,
-            city: p.city ?? city,
-            sector: p.category ?? sector,
-            naf_code: null,
-            siret: null,
-            website_url: p.website ?? null,
-            google_maps_url: null,
-            google_rating: null,
-            google_reviews_count: 0,
-            source: 'pagesjaunes',
-          })
-        }
-        if (pjResults.length > 0) {
-          await log(`✓ Pages Jaunes: ${pjResults.length} résultats pour "${sector} ${city}"`, 'success')
-        }
-      } catch {
-        // PJ scraping optional — don't fail the whole scan
-      }
-    } catch (e: any) {
-      await log(`✗ Erreur collecte "${query}": ${e.message}`, 'error')
+  for (const batch of serperBatches) {
+    if (batch.status !== 'fulfilled') continue
+    const { sector, city, results } = batch.value
+    for (const p of results) {
+      all.push({
+        name: p.name, phone: p.phone, address: p.address,
+        city, sector, naf_code: null, siret: null,
+        website_url: p.website ?? null,
+        google_maps_url: p.googleMapsUrl,
+        google_rating: p.rating,
+        google_reviews_count: p.reviewsCount,
+        source: 'serper',
+      })
     }
   }
+
+  // Pages Jaunes in parallel — limit to 3 concurrent Playwright browsers
+  await concurrentMap(pairs, async ({ sector, city }) => {
+    try {
+      const pjResults = await scrapePagesJaunes(sector, city, 15)
+      for (const p of pjResults) {
+        all.push({
+          name: p.name, phone: p.phone, address: p.address,
+          city: p.city ?? city, sector: p.category ?? sector,
+          naf_code: null, siret: null,
+          website_url: p.website ?? null,
+          google_maps_url: null, google_rating: null,
+          google_reviews_count: 0,
+          source: 'pagesjaunes',
+        })
+      }
+      if (pjResults.length > 0) {
+        await log(`✓ Pages Jaunes: ${pjResults.length} résultats pour "${sector} ${city}"`, 'success')
+      }
+    } catch { /* PJ scraping optional */ }
+  }, 3)
 
   return all
 }
@@ -128,7 +163,8 @@ export async function enrichCompanies(
   if (!process.env.PAPPERS_API_KEY) return deduped
 
   const toEnrich = deduped.slice(0, 30) // limit API calls
-  for (const company of toEnrich) {
+  // Parallelize with limit 5 to respect Pappers rate limits
+  await concurrentMap(toEnrich, async (company) => {
     try {
       const pappers = await searchPappers(company.name, company.city ?? undefined)
       if (pappers) {
@@ -137,10 +173,8 @@ export async function enrichCompanies(
         if (!company.phone && pappers.phone) company.phone = pappers.phone
         if (!company.website_url && pappers.website) company.website_url = pappers.website
       }
-    } catch {
-      // Silently skip failed Pappers lookups
-    }
-  }
+    } catch { /* skip failed lookups */ }
+  }, 5)
 
   await log(`✓ Enrichissement Pappers terminé (${toEnrich.length} entreprises)`, 'info')
   return deduped
@@ -151,6 +185,7 @@ export async function enrichCompanies(
 export async function auditWebsite(
   url: string,
   log: LogFn,
+  sharedBrowser?: import('playwright').Browser,
 ): Promise<AuditResult> {
   let domain = ''
   try {
@@ -193,29 +228,32 @@ export async function auditWebsite(
 
   try {
     const { chromium } = await import('playwright')
-    const browser = await chromium.launch({ headless: true })
+    const browser = sharedBrowser ?? await chromium.launch({ headless: true })
+    const ownBrowser = !sharedBrowser
     try {
       const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (compatible; SmartAuditor/1.0)',
       })
       const page = await context.newPage()
+      try {
+        const start = Date.now()
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 })
+        loadTimeMs = Date.now() - start
 
-      const start = Date.now()
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 })
-      loadTimeMs = Date.now() - start
+        await page.setViewportSize({ width: 375, height: 812 })
+        const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth).catch(() => 800)
+        isResponsive = scrollWidth <= 420
 
-      await page.setViewportSize({ width: 375, height: 812 })
-      await page.waitForTimeout(400)
-      const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth).catch(() => 800)
-      isResponsive = scrollWidth <= 420
-
-      hasMetaTags = await page.evaluate(() => {
-        const title = document.querySelector('title')?.textContent?.trim()
-        const desc = document.querySelector('meta[name="description"]')?.getAttribute('content')?.trim()
-        return !!(title && title.length > 3 && desc && desc.length > 10)
-      }).catch(() => false)
+        hasMetaTags = await page.evaluate(() => {
+          const title = document.querySelector('title')?.textContent?.trim()
+          const desc = document.querySelector('meta[name="description"]')?.getAttribute('content')?.trim()
+          return !!(title && title.length > 3 && desc && desc.length > 10)
+        }).catch(() => false)
+      } finally {
+        await context.close()
+      }
     } finally {
-      await browser.close()
+      if (ownBrowser) await browser.close()
     }
   } catch {
     // Playwright failed — use defaults
@@ -305,32 +343,42 @@ function computeScore(company: RawCompany, audit: AuditResult | null, intel: Ret
   const hasWebsite = !!company.website_url
 
   if (!hasWebsite) {
-    // No website = maximum opportunity
-    score += 40
-    score += Math.min(intel.priority_score * 0.3, 25) // sector priority
-    if (company.google_reviews_count >= 50) score += 10
-    if (company.google_rating && company.google_rating > 4.0) score += 5
-    if (company.google_reviews_count < 5) score += 5 // no reviews = invisible online
+    // 🔴 CRITIQUE — absence totale de site (perd 100% du trafic Google)
+    score += 40 // base opportunité
+    score += Math.min(intel.priority_score * 0.35, 30) // bonus secteur prioritaire (BTP → +33, agriculture → +32)
+
+    // Signaux aggravants : encore plus invisible
+    if (company.google_reviews_count < 5) score += 10  // quasi-inconnu en ligne
+    if (company.google_reviews_count >= 50) score += 5 // actif mais sans site = FOMO fort
+
     return Math.min(Math.round(score), 100)
   }
 
-  // Has website: score based on quality issues
+  // A un site — on évalue sa qualité
   if (audit) {
-    if (!audit.is_responsive) score += 25
-    if (audit.lighthouse_score < 50) score += 20
-    if (!audit.has_https) score += 15
-    if (!audit.has_meta_tags) score += 10
-    if (audit.indexed_pages < 5) score += 10
+    // 🟠 FORT — gros problèmes techniques (site qui ne sert à rien)
+    if (!audit.is_responsive) score += 25                                            // pas mobile
+    if (audit.load_time_ms > 3000 || audit.lighthouse_score < 50) score += 20       // lent / perf nulle
+    else if (audit.lighthouse_score < 70) score += 10                               // moyen
+    if (!audit.has_https) score += 15                                                // non sécurisé
+    if (audit.indexed_pages < 3) score += 12                                         // SEO mort
+    else if (audit.indexed_pages < 10) score += 6
+
+    // 🟡 MOYEN — manque de conversion / contenu
+    if (!audit.has_meta_tags) score += 10                                            // 0 SEO on-page
     if (!audit.has_sitemap) score += 5
     if (!audit.has_robots) score += 3
-    if (audit.vision_score && audit.vision_score > 60) score += Math.round((audit.vision_score - 60) * 0.3)
+    if (audit.vision_score && audit.vision_score > 65) {
+      score += Math.round((audit.vision_score - 65) * 0.35)                         // design très vieux
+    }
   }
 
+  // 📊 Signaux business et secteur
   if (company.google_reviews_count >= 50) score += 8
   if (company.google_rating && company.google_rating > 4.0) score += 5
-  score += Math.min(intel.priority_score * 0.15, 10)
+  score += Math.min(intel.priority_score * 0.12, 10)
 
-  // Adjust for local competition
+  // Ajustement concurrence locale
   const competitionScore = scoreLocalCompetition(company.city, company.sector, company.google_reviews_count)
   score = adjustScoreForCompetition(score, competitionScore)
 
@@ -406,64 +454,70 @@ export async function runSmartScan(
 
   // Companies with websites: audit if enabled
   if (auditSites && companiesWithSites.length > 0) {
-    await log(`🔬 Audit de ${companiesWithSites.length} sites web...`, 'analyzing', { progress: 52 })
-    const toAudit = companiesWithSites.slice(0, 40) // cap at 40 audits
+    await log(`🔬 Audit de ${companiesWithSites.length} sites web (4 en parallèle)...`, 'analyzing', { progress: 52 })
+    const toAudit = companiesWithSites.slice(0, 40)
 
-    for (let i = 0; i < toAudit.length; i++) {
-      const company = toAudit[i]
-      const intel = buildBusinessIntelligence(company)
+    // Launch one shared browser for all audits — avoids 40× browser launch overhead
+    const { chromium } = await import('playwright')
+    const browser = await chromium.launch({ headless: true })
+    let auditsDone = 0
 
-      let audit: AuditResult | null = null
-      try {
-        audit = await auditWebsite(company.website_url!, log)
-        const issues = []
-        if (!audit.is_responsive) issues.push('pas mobile')
-        if (audit.lighthouse_score < 50) issues.push(`perf ${audit.lighthouse_score}/100`)
-        if (!audit.has_https) issues.push('no HTTPS')
-        if (!audit.has_meta_tags) issues.push('SEO vide')
-        if (audit.indexed_pages < 5) issues.push(`${audit.indexed_pages} pages indexées`)
-        if (audit.cms) issues.push(`CMS: ${audit.cms}`)
+    try {
+      await concurrentMap(toAudit, async (company) => {
+        const intel = buildBusinessIntelligence(company)
+        let audit: AuditResult | null = null
 
-        if (issues.length > 0) {
-          await log(`⚠ ${audit.domain} — ${issues.join(', ')}`, 'success')
-        } else {
-          await log(`✓ ${audit.domain} — site correct`, 'info')
-        }
-      } catch (e: any) {
-        await log(`✗ Échec audit ${company.website_url}: ${e.message}`, 'error')
-      }
-
-      const score = computeScore(company, audit, intel)
-
-      // Hunter email enrichment
-      let email: string | null = null
-      if (enrichWithHunter && audit?.domain) {
         try {
-          email = await findEmail(audit.domain, company.name)
-        } catch { /* optional */ }
-      }
+          audit = await auditWebsite(company.website_url!, log, browser)
+          const issues = []
+          if (!audit.is_responsive) issues.push('pas mobile')
+          if (audit.lighthouse_score < 50) issues.push(`perf ${audit.lighthouse_score}/100`)
+          if (!audit.has_https) issues.push('no HTTPS')
+          if (!audit.has_meta_tags) issues.push('SEO vide')
+          if (audit.indexed_pages < 5) issues.push(`${audit.indexed_pages} pages indexées`)
+          if (audit.cms) issues.push(`CMS: ${audit.cms}`)
 
-      scoredLeads.push({
-        company_name: company.name,
-        sector: company.sector,
-        naf_code: company.naf_code,
-        siret: company.siret,
-        city: company.city,
-        address: company.address,
-        phone: company.phone,
-        email,
-        website_url: company.website_url,
-        google_maps_url: company.google_maps_url,
-        google_rating: company.google_rating,
-        google_reviews_count: company.google_reviews_count,
-        score,
-        scoring_status: audit ? 'complete' : 'partial',
-        audit,
-        intelligence: intel,
-      })
+          if (issues.length > 0) {
+            await log(`⚠ ${audit.domain} — ${issues.join(', ')}`, 'success')
+          } else {
+            await log(`✓ ${audit.domain} — site correct`, 'info')
+          }
+        } catch (e: any) {
+          await log(`✗ Échec audit ${company.website_url}: ${e.message}`, 'error')
+        }
 
-      const progress = 52 + Math.round((i / toAudit.length) * 40)
-      await log('', 'info', { progress, leads_found: enrichedCompanies.length })
+        const score = computeScore(company, audit, intel)
+
+        let email: string | null = null
+        if (enrichWithHunter && audit?.domain) {
+          try { email = await findEmail(audit.domain, company.name) } catch { /* optional */ }
+        }
+
+        scoredLeads.push({
+          company_name: company.name,
+          sector: company.sector,
+          naf_code: company.naf_code,
+          siret: company.siret,
+          city: company.city,
+          address: company.address,
+          phone: company.phone,
+          email,
+          website_url: company.website_url,
+          google_maps_url: company.google_maps_url,
+          google_rating: company.google_rating,
+          google_reviews_count: company.google_reviews_count,
+          score,
+          scoring_status: audit ? 'complete' : 'partial',
+          audit,
+          intelligence: intel,
+        })
+
+        auditsDone++
+        const progress = 52 + Math.round((auditsDone / toAudit.length) * 40)
+        await log('', 'info', { progress, leads_found: enrichedCompanies.length })
+      }, 4) // 4 audits simultanés
+    } finally {
+      await browser.close()
     }
 
     // Remaining companies with sites but not audited

@@ -7,55 +7,129 @@ export interface NafEntry {
 }
 
 export const NAF_MATRIX: Record<string, NafEntry> = {
-  '56': {
-    label: 'Restauration',
-    priority: 90,
-    avg_ticket: 3500,
+  // 🥇 BTP & artisans — MEILLEURE NICHE (48% sans site, gros panier 1500–5000€)
+  '43': {
+    label: 'Travaux de construction spécialisés',
+    priority: 95,
+    avg_ticket: 5000,
     seasonal: true,
-    tags: ['restauration', 'B2C', 'urgent'],
+    tags: ['artisan', 'B2C', 'urgent', 'top-niche'],
   },
-  '47': {
-    label: 'Commerce de détail',
-    priority: 75,
+  '41': {
+    label: 'Construction de bâtiments',
+    priority: 90,
+    avg_ticket: 8000,
+    seasonal: true,
+    tags: ['BTP', 'B2C', 'urgent'],
+  },
+  '42': {
+    label: 'Génie civil',
+    priority: 82,
+    avg_ticket: 6000,
+    seasonal: true,
+    tags: ['BTP', 'B2B'],
+  },
+  // 🥈 Agriculture / producteurs locaux — BLUE OCEAN (65% sans site, peu de concurrence)
+  '01': {
+    label: 'Agriculture, maraîchage, élevage',
+    priority: 92,
+    avg_ticket: 2000,
+    seasonal: true,
+    tags: ['agriculture', 'B2C', 'blue-ocean', 'circuits-courts'],
+  },
+  '02': {
+    label: 'Sylviculture, exploitation forestière',
+    priority: 70,
+    avg_ticket: 3000,
+    seasonal: true,
+    tags: ['agriculture', 'B2B'],
+  },
+  '10': {
+    label: 'Industrie alimentaire / transformation',
+    priority: 78,
     avg_ticket: 2500,
     seasonal: true,
-    tags: ['commerce', 'B2C'],
+    tags: ['agro-alimentaire', 'B2C'],
   },
+  // 🥉 Restaurants / hôtels — ARGENT RAPIDE (dépendance Booking, sites souvent nuls)
+  '56': {
+    label: 'Restauration',
+    priority: 88,
+    avg_ticket: 3500,
+    seasonal: true,
+    tags: ['restauration', 'B2C', 'urgent', 'booking-dependance'],
+  },
+  '55': {
+    label: 'Hébergement touristique (hôtels, gîtes…)',
+    priority: 85,
+    avg_ticket: 4500,
+    seasonal: true,
+    tags: ['tourisme', 'B2C', 'urgent', 'booking-dependance'],
+  },
+  // 4. Services à la personne (55% sans site, forte demande Google locale)
+  '88': {
+    label: 'Action sociale / services à la personne',
+    priority: 87,
+    avg_ticket: 1800,
+    seasonal: false,
+    tags: ['service', 'B2C', 'local', 'haute-demande-google'],
+  },
+  // 5. Artisans d'art (très peu digitalisés, Instagram ≠ SEO)
+  '90': {
+    label: 'Activités créatives et artistiques',
+    priority: 78,
+    avg_ticket: 2000,
+    seasonal: false,
+    tags: ['artisanat-art', 'B2C', 'storytelling'],
+  },
+  // 6. Professions santé (crédibilité + Doctolib insuffisant)
+  '86': {
+    label: 'Activités pour la santé humaine',
+    priority: 75,
+    avg_ticket: 2000,
+    seasonal: false,
+    tags: ['santé', 'B2C', 'crédibilité'],
+  },
+  '87': {
+    label: 'Hébergement médico-social',
+    priority: 60,
+    avg_ticket: 3000,
+    seasonal: false,
+    tags: ['santé', 'B2B/B2C'],
+  },
+  // 7. Services personnels (coiffure, beauté…)
   '96': {
     label: 'Services personnels (coiffure, beauté…)',
-    priority: 85,
+    priority: 80,
     avg_ticket: 2000,
     seasonal: false,
     tags: ['service', 'B2C', 'local'],
   },
-  '43': {
-    label: 'Travaux de construction spécialisés',
-    priority: 80,
-    avg_ticket: 5000,
+  // 8. Commerce de détail (40% sans site, click & collect sous-exploité)
+  '47': {
+    label: 'Commerce de détail',
+    priority: 72,
+    avg_ticket: 2500,
     seasonal: true,
-    tags: ['artisan', 'B2C', 'urgent'],
+    tags: ['commerce', 'B2C', 'click-collect'],
   },
+  // 9. Automobile
   '45': {
     label: 'Commerce et réparation automobile',
-    priority: 70,
+    priority: 68,
     avg_ticket: 4000,
     seasonal: false,
     tags: ['auto', 'B2C'],
   },
-  '49': {
-    label: 'Transport terrestre / taxi',
-    priority: 65,
-    avg_ticket: 3000,
-    seasonal: false,
-    tags: ['transport', 'B2C'],
-  },
+  // 10. Immobilier
   '68': {
     label: 'Activités immobilières',
-    priority: 60,
+    priority: 62,
     avg_ticket: 8000,
     seasonal: false,
     tags: ['immobilier', 'B2B/B2C'],
   },
+  // 11. Conseil / juridique
   '69': {
     label: 'Activités juridiques et comptables',
     priority: 55,
@@ -63,12 +137,13 @@ export const NAF_MATRIX: Record<string, NafEntry> = {
     seasonal: false,
     tags: ['conseil', 'B2B'],
   },
-  '86': {
-    label: 'Activités pour la santé humaine',
-    priority: 50,
-    avg_ticket: 2000,
+  // ❌ Transport / logistique — moins intéressant (peu digitalisés, décision lente)
+  '49': {
+    label: 'Transport terrestre / taxi',
+    priority: 45,
+    avg_ticket: 3000,
     seasonal: false,
-    tags: ['santé', 'B2C'],
+    tags: ['transport', 'B2C', 'decision-lente'],
   },
 }
 
@@ -114,15 +189,32 @@ export function getSectorPriority(sector: string | null, naf: string | null): nu
   if (sector) {
     const normalized = sector.toLowerCase()
 
-    if (/restaurant|brasserie|pizz|traiteur|café|bar|snack|kebab|sushi/.test(normalized)) return 90
-    if (/coiffeur|coiffure|esthétique|estheti|beauté|beaute|nail|spa|massage/.test(normalized)) return 85
-    if (/plombier|plomberie|électricien|electricien|maçon|maconnerie|charpente|couvreur|carrelage|peintre|peinture|menuiserie|chauffage|climatisation/.test(normalized)) return 80
-    if (/commerce|boutique|magasin|librairie|épicerie|epicerie|fleuriste|bijouterie/.test(normalized)) return 75
-    if (/garage|mécanique|mecanique|carrosserie|auto/.test(normalized)) return 70
-    if (/taxi|vtc|transport|livraison/.test(normalized)) return 65
-    if (/immobilier|agence immobilière|promoteur/.test(normalized)) return 60
+    // 🥇 BTP & artisans — meilleure niche (95)
+    if (/plombier|plomberie|électricien|electricien|maçon|maçonnerie|maconnerie|charpente|couvreur|carrelage|peintre en bât|menuiserie|chauffagiste|climatisation|serrurier|vitrier/.test(normalized)) return 95
+    // 🥈 Agriculture / producteurs locaux — blue ocean (92)
+    if (/maraîcher|maraicher|agriculteur|agriculture|producteur|ferme\b|fermier|éleveur|eleveur|viticulteur|arboriculteur|apiculteur|circuit.?court|bio\b/.test(normalized)) return 92
+    // Services à la personne (87)
+    if (/aide.?à.?domicile|garde.?d.?enfant|auxiliaire.?de.?vie|femme.?de.?ménage|jardinage|garde.?animal/.test(normalized)) return 87
+    // 🥉 Restaurants (88)
+    if (/restaurant|brasserie|pizz|traiteur|café|bar\b|snack|kebab|sushi|crêperie|creperie|fast.?food/.test(normalized)) return 88
+    // Hébergement (85)
+    if (/hôtel|hotel|gîte|gite|chambre.?d.?hôte|auberge|camping/.test(normalized)) return 85
+    // Services personnels (80)
+    if (/coiffeur|coiffure|esthétique|estheti|beauté|beaute|nail\s*bar|spa\b|massage|institut/.test(normalized)) return 80
+    // Artisans d'art (78)
+    if (/artisan.?d.?art|potier|sculpteur|céramiste|ceramiste|luthier|ébéniste|ebeniste|joaillier/.test(normalized)) return 78
+    // Santé (75)
+    if (/médecin|medecin|dentiste|kiné|kinesithérapeute|pharmacie|infirmier|orthophoniste/.test(normalized)) return 75
+    // Commerce de détail (72)
+    if (/commerce|boutique|magasin|librairie|épicerie|epicerie|fleuriste|bijouterie/.test(normalized)) return 72
+    // Automobile (68)
+    if (/garage|mécanique|mecanique|carrosserie|auto/.test(normalized)) return 68
+    // Immobilier (62)
+    if (/immobilier|agence immobilière|promoteur/.test(normalized)) return 62
+    // Conseil / juridique (55)
     if (/comptable|expertise comptable|avocat|notaire|juridique/.test(normalized)) return 55
-    if (/médecin|medecin|dentiste|kiné|kinesithérapeute|pharmacie|infirmier|orthophoniste/.test(normalized)) return 50
+    // Transport (45) — moins intéressant
+    if (/taxi|vtc|transport|livraison/.test(normalized)) return 45
   }
 
   return DEFAULT_ENTRY.priority
@@ -135,32 +227,57 @@ export function getSectorPriority(sector: string | null, naf: string | null): nu
 export function detectSectorFromName(name: string, sector: string | null): string | null {
   const haystack = `${name} ${sector ?? ''}`.toLowerCase()
 
+  // 🥇 BTP & artisans
+  if (/plombier|plomberie|électricien|electricien|maçon|maçonnerie|maconnerie|charpente|couvreur|carrelage|peintre en bât|menuiserie|chauffagiste|climatisation|serrurier|vitrier/.test(haystack)) {
+    return 'Construction & artisanat'
+  }
+  // 🥈 Agriculture / producteurs locaux
+  if (/maraîcher|maraicher|agriculteur|agriculture|producteur|ferme\b|fermier|éleveur|eleveur|viticulteur|arboriculteur|apiculteur|circuit.?court/.test(haystack)) {
+    return 'Agriculture & circuits courts'
+  }
+  // Services à la personne
+  if (/aide.?à.?domicile|garde.?d.?enfant|auxiliaire.?de.?vie|femme.?de.?ménage|jardinage|garde.?animal/.test(haystack)) {
+    return 'Services à la personne'
+  }
+  // 🥉 Restauration
   if (/restaurant|brasserie|pizz|traiteur|café|bar\b|snack|kebab|sushi|crêperie|creperie|fast.?food/.test(haystack)) {
     return 'Restauration'
   }
+  // Hébergement
+  if (/hôtel|hotel|gîte|gite|chambre.?d.?hôte|auberge|camping/.test(haystack)) {
+    return 'Hébergement touristique'
+  }
+  // Artisans d'art
+  if (/artisan.?d.?art|potier|sculpteur|céramiste|ceramiste|luthier|ébéniste|ebeniste|joaillier/.test(haystack)) {
+    return "Artisanat d'art"
+  }
+  // Services personnels
   if (/coiffeur|coiffure|esthétique|estheti|beauté|beaute|nail\s*bar|spa\b|massage|institut/.test(haystack)) {
     return 'Services personnels'
   }
-  if (/plombier|plomberie|électricien|electricien|maçon|maçonnerie|maconnerie|charpente|couvreur|carrelage|peintre|menuiserie|chauffage|climatisation|artisan/.test(haystack)) {
-    return 'Construction & artisanat'
+  // Santé
+  if (/médecin|medecin|dentiste|kiné|kinésithérapeute|kinesithérapeute|pharmacie|infirmier|orthophoniste|santé|sante/.test(haystack)) {
+    return 'Santé'
   }
+  // Commerce de détail
   if (/commerce|boutique|magasin|librairie|épicerie|epicerie|fleuriste|bijouterie|retail/.test(haystack)) {
     return 'Commerce de détail'
   }
+  // Automobile
   if (/garage|mécanique|mecanique|carrosserie|auto/.test(haystack)) {
     return 'Automobile'
   }
-  if (/taxi|vtc|transport|livraison|coursier/.test(haystack)) {
-    return 'Transport'
-  }
+  // Immobilier
   if (/immobilier|agence immobilière|agence immobiliere|promoteur/.test(haystack)) {
     return 'Immobilier'
   }
+  // Conseil / juridique
   if (/comptable|expertise comptable|avocat|notaire|juridique|cabinet/.test(haystack)) {
     return 'Conseil & juridique'
   }
-  if (/médecin|medecin|dentiste|kiné|kinésithérapeute|kinesithérapeute|pharmacie|infirmier|orthophoniste|santé|sante/.test(haystack)) {
-    return 'Santé'
+  // Transport
+  if (/taxi|vtc|transport|livraison|coursier/.test(haystack)) {
+    return 'Transport'
   }
 
   return sector ?? null

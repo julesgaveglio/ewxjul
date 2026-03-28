@@ -4,11 +4,33 @@ import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { ScrapingJob } from '@/lib/types/database'
 
+type Country = 'fr' | 'nz'
+
+const COUNTRY_CONFIG = {
+  fr: {
+    flag: '🇫🇷',
+    label: 'France',
+    description: 'Multi-sources (Serper + Pages Jaunes), audit complet (SSL, PageSpeed, CMS, vision IA), enrichissement email.',
+    endpoint: '/api/scan/smart',
+    scanLabel: 'Lancer le scan France',
+  },
+  nz: {
+    flag: '🇳🇿',
+    label: 'Nouvelle-Zélande',
+    description: 'Google Maps (Serper), audit complet (SSL, PageSpeed, CMS, vision IA), enrichissement email. Secteurs adaptés au marché NZ.',
+    endpoint: '/api/scan/smart-nz',
+    scanLabel: 'Lancer le scan NZ',
+  },
+}
+
 export default function ScanPage() {
+  const [country, setCountry] = useState<Country>('fr')
   const [job, setJob] = useState<ScrapingJob | null>(null)
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
+
+  const config = COUNTRY_CONFIG[country]
 
   // Restore active job on mount
   useEffect(() => {
@@ -50,7 +72,7 @@ export default function ScanPage() {
     setError(null)
     setScanning(true)
     setJob(null)
-    const res = await fetch('/api/scan/smart', { method: 'POST' })
+    const res = await fetch(config.endpoint, { method: 'POST' })
     const data = await res.json()
     if (!res.ok) {
       setError(data.error)
@@ -71,20 +93,44 @@ export default function ScanPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Scanner des prospects</h1>
 
-      {/* Smart scan */}
+      {/* Country selector */}
+      <div className="card p-1.5 flex gap-1.5 w-fit">
+        {(Object.keys(COUNTRY_CONFIG) as Country[]).map((c) => {
+          const cfg = COUNTRY_CONFIG[c]
+          const isActive = country === c
+          return (
+            <button
+              key={c}
+              onClick={() => { setCountry(c); setError(null) }}
+              disabled={scanning}
+              className={`flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 ${
+                isActive
+                  ? 'bg-accent text-white'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg'
+              }`}
+            >
+              <span className="text-base">{cfg.flag}</span>
+              <span>{cfg.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Smart scan card */}
       <div className="card p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
         <div className="flex-1">
-          <p className="font-medium">Smart Scan</p>
-          <p className="text-sm text-text-secondary mt-1">
-            Multi-sources (Serper + Pages Jaunes), audit complet (SSL, PageSpeed, CMS, vision IA), enrichissement email.
+          <p className="font-medium flex items-center gap-2">
+            <span className="text-xl">{config.flag}</span>
+            Smart Scan {config.label}
           </p>
+          <p className="text-sm text-text-secondary mt-1">{config.description}</p>
         </div>
         <button
           onClick={handleScan}
           disabled={scanning}
           className="w-full sm:w-auto px-8 py-3 bg-accent hover:bg-accent-hover text-white rounded-md font-semibold transition-colors disabled:opacity-50 whitespace-nowrap"
         >
-          {scanning ? 'Scan en cours...' : '🚀 Lancer le scan'}
+          {scanning ? 'Scan en cours...' : `🚀 ${config.scanLabel}`}
         </button>
       </div>
 

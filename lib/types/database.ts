@@ -3,8 +3,10 @@ export type DemoStatus = 'idle' | 'scraping' | 'generating' | 'deploying' | 'dep
 export type ScoringStatus = 'partial' | 'complete'
 export type JobStatus = 'pending' | 'running' | 'completed' | 'error'
 export type AssignedTo = 'jules' | 'ewan'
+export type Country = 'fr' | 'nz'
 
 export interface Lead {
+  country: Country | null
   id: string
   created_at: string
   company_name: string
@@ -66,6 +68,20 @@ export interface ScanLogEntry {
   time: string
   message: string
   type: 'info' | 'success' | 'error' | 'analyzing'
+}
+
+export type ContactCategory = 'reseau' | 'client' | 'partenaire' | 'fournisseur' | 'referent' | 'investisseur'
+
+export interface Contact {
+  id: string
+  created_at: string
+  name: string
+  company: string | null
+  phone: string | null
+  email: string | null
+  category: ContactCategory
+  notes: string | null
+  assigned_to: AssignedTo | null
 }
 
 export interface ScrapingJob {
