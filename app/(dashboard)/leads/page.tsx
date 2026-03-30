@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { LeadsFilters, type FiltersState } from '@/components/leads/leads-filters'
 import { LeadsTable } from '@/components/leads/leads-table'
 import { KanbanBoard } from '@/components/leads/kanban-board'
+import { LeadsImport } from '@/components/leads/leads-import'
 import type { Lead, Country } from '@/lib/types/database'
 
 type CountryTab = Country | 'all'
@@ -20,7 +21,7 @@ const COUNTRY_TABS: { key: CountryTab; flag: string; label: string }[] = [
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [countryTab, setCountryTab] = useState<CountryTab>('all')
-  const [view, setView] = useState<'table' | 'kanban'>('table')
+  const [view, setView] = useState<'table' | 'kanban' | 'import'>('table')
   const [filters, setFilters] = useState<FiltersState>({
     search: '',
     status: '',
@@ -129,12 +130,22 @@ export default function LeadsPage() {
             setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l))
           }}
         />
-      ) : (
+      ) : view === 'kanban' ? (
         <KanbanBoard leads={filteredLeads} onLeadUpdate={() => {
           createClient().from('leads').select('*').order('score', { ascending: false }).then(({ data }) => {
             if (data) setLeads(data)
           })
         }} />
+      ) : (
+        <LeadsImport
+          allLeads={leads}
+          onLeadsImported={() => {
+            createClient().from('leads').select('*').order('score', { ascending: false }).then(({ data }) => {
+              if (data) setLeads(data)
+            })
+          }}
+          onSwitchToTable={() => setView('table')}
+        />
       )}
     </div>
   )
