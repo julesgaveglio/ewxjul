@@ -1,4 +1,6 @@
-export type LeadStatus = 'to_call' | 'contacted' | 'demo_sent' | 'sold' | 'refused'
+export type LeadStatus = 'to_call' | 'contacted' | 'demo_sent' | 'proposal_sent' | 'sold' | 'refused'
+export type LeadCategory = 'site_web' | 'automation_ai'
+export type IndustryTier = 'tier_1' | 'tier_2'
 export type DemoStatus = 'idle' | 'scraping' | 'generating' | 'deploying' | 'deployed' | 'error'
 export type ScoringStatus = 'partial' | 'complete'
 export type JobStatus = 'pending' | 'running' | 'completed' | 'error'
@@ -31,6 +33,17 @@ export interface Lead {
   last_contact_at: string | null
   brand_data: BrandData | null
   owner_name: string | null
+  // Phase 1 additions
+  category: LeadCategory
+  industry: string | null
+  industry_tier: IndustryTier | null
+  employee_count: string | null
+  revenue_range: string | null
+  contact_email: string | null
+  contact_title: string | null
+  contact_linkedin: string | null
+  pain_points: string[] | null
+  budget_estimate: string | null
 }
 
 export interface BrandData {
