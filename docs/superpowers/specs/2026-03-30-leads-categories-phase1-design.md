@@ -18,27 +18,32 @@ La migration est **additive** : aucune donnée existante n'est perdue. Les leads
 
 ### Nouvelles colonnes sur `leads`
 
-| Colonne | Type SQL | Contrainte | Default |
-|---|---|---|---|
-| `category` | TEXT | CHECK ('site_web', 'automation_ai') NOT NULL | `'site_web'` |
-| `industry` | TEXT | — | NULL |
-| `industry_tier` | TEXT | CHECK ('tier_1', 'tier_2') | NULL |
-| `employee_count` | TEXT | — | NULL (ex: '1-10', '10-50', '51-200') |
-| `revenue_range` | TEXT | — | NULL (ex: '500k-2M', '2M-10M') |
-| `contact_email` | TEXT | — | NULL |
-| `contact_title` | TEXT | — | NULL |
-| `contact_linkedin` | TEXT | — | NULL |
-| `pain_points` | JSONB | — | NULL (array de strings) |
-| `budget_estimate` | TEXT | — | NULL (ex: '3000-8000') |
+SQL exact de la migration :
+
+```sql
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'site_web'
+  CHECK (category IN ('site_web', 'automation_ai'));
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS industry TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS industry_tier TEXT
+  CHECK (industry_tier IS NULL OR industry_tier IN ('tier_1', 'tier_2'));
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS employee_count TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS revenue_range TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_email TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_title TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_linkedin TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS pain_points JSONB;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS budget_estimate TEXT;
+```
 
 ### Modification du statut existant
 
-Le CHECK constraint sur `status` est étendu pour inclure `'proposal_sent'` :
+`status` est un type ENUM Postgres (`lead_status` défini en migration 001). Pour ajouter `proposal_sent` il faut :
 
 ```sql
--- Ancien : 'to_call' | 'contacted' | 'demo_sent' | 'sold' | 'refused'
--- Nouveau : ajouter 'proposal_sent'
+ALTER TYPE lead_status ADD VALUE IF NOT EXISTS 'proposal_sent';
 ```
+
+Note : `ALTER TYPE ... ADD VALUE` ne peut pas être exécuté dans un bloc transactionnel. La migration doit l'exécuter hors transaction (Supabase SQL Editor l'accepte directement).
 
 Les workflows par catégorie :
 - **Site Web** : `to_call → contacted → demo_sent → sold / refused`
@@ -63,8 +68,10 @@ La colonne `country` existante ('fr' | 'nz') joue le rôle de zone géographique
 
 ```typescript
 export type LeadCategory = 'site_web' | 'automation_ai'
+// LeadStatus étendu (était: 'to_call'|'contacted'|'demo_sent'|'sold'|'refused')
 export type LeadStatus = 'to_call' | 'contacted' | 'demo_sent' | 'proposal_sent' | 'sold' | 'refused'
 export type IndustryTier = 'tier_1' | 'tier_2'
+// Note: ContactCategory existe déjà dans database.ts pour l'interface Contact — pas de collision
 
 // Champs ajoutés à l'interface Lead :
 category: LeadCategory           // default 'site_web'
@@ -102,6 +109,22 @@ Le state de navigation passe de `countryTab: 'all' | 'fr' | 'nz'` à :
 - `geoTab: Country` (défaut `'fr'`)
 
 Le filtre `filteredLeads` applique : `lead.category === category && (lead.country ?? 'fr') === geoTab`.
+
+### Compteurs de badges (`countByView`)
+
+Remplace `countByCountry` par un memo calculant les 4 combinaisons :
+
+```typescript
+const countByView = useMemo(() => ({
+  site_web_fr: leads.filter(l => l.category === 'site_web' && (l.country ?? 'fr') === 'fr').length,
+  site_web_nz: leads.filter(l => l.category === 'site_web' && l.country === 'nz').length,
+  automation_ai_fr: leads.filter(l => l.category === 'automation_ai' && (l.country ?? 'fr') === 'fr').length,
+  automation_ai_nz: leads.filter(l => l.category === 'automation_ai' && l.country === 'nz').length,
+}), [leads])
+```
+
+Badge niveau 1 (catégorie) = somme des deux zones : ex. `countByView.site_web_fr + countByView.site_web_nz`.
+Badge niveau 2 (géo) = valeur directe : ex. `countByView.site_web_fr`.
 
 ---
 
@@ -153,10 +176,13 @@ Le composant `LeadsTable` reçoit un prop `category: LeadCategory` et rend les c
 | Fichier | Action |
 |---|---|
 | `supabase/migrations/009_add_category_fields.sql` | Créer — migration additive |
-| `lib/types/database.ts` | Modifier — nouveaux types + champs Lead |
-| `app/(dashboard)/leads/page.tsx` | Modifier — navigation 2 niveaux (category + geoTab) |
+| `lib/types/database.ts` | Modifier — nouveaux types + champs Lead + LeadStatus étendu |
+| `app/(dashboard)/leads/page.tsx` | Modifier — navigation 2 niveaux (category + geoTab), countByView |
 | `components/leads/leads-table.tsx` | Modifier — prop `category`, colonnes adaptatives |
-| `components/leads/leads-filters.tsx` | Modifier — filtres industry/tier pour Auto IA |
+| `components/leads/leads-filters.tsx` | Modifier — filtres industry/tier pour Auto IA + option 'Proposition envoyée' dans status select |
+| `components/ui/status-badge.tsx` | Modifier — ajouter `proposal_sent` dans STATUS_CONFIG |
+| `components/leads/kanban-board.tsx` | Modifier — ajouter `proposal_sent` dans STATUSES[] |
+| `components/leads/kanban-column.tsx` | Modifier — ajouter `proposal_sent` dans la config de colonnes |
 
 ---
 
@@ -165,8 +191,8 @@ Le composant `LeadsTable` reçoit un prop `category: LeadCategory` et rend les c
 - Page détail `/leads/[id]` : inchangée (demo, brand_data, scoring restent pour Site Web)
 - Pipeline scan (`smart-scan.ts`, `smart-scan-nz.ts`) : inchangé (Phase 2)
 - Scoring (`lib/scoring.ts`) : inchangé (Phase 2)
-- Import CSV (`components/leads/leads-import.tsx`) : inchangé (les leads importés reçoivent `category: 'site_web'` par défaut, l'utilisateur peut mapper `category` si présente dans le CSV)
-- KanbanBoard : inchangé
+- Import CSV (`components/leads/leads-import.tsx`) : inchangé. Les leads importés reçoivent `category: 'site_web'` par défaut. Le mapping `category` n'est **pas** exposé dans l'interface d'import (la colonne n'est pas ajoutée à `IMPORTABLE_FIELDS` — trop risqué pour les utilisateurs). Si besoin, la catégorie peut être changée manuellement sur chaque lead après import.
+- KanbanBoard (`kanban-board.tsx`, `kanban-column.tsx`) : modifiés uniquement pour ajouter `proposal_sent` dans les configs de statuts (voir section "Fichiers à modifier")
 
 ---
 
