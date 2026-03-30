@@ -5,7 +5,7 @@ import type { Lead, LeadStatus } from '@/lib/types/database'
 import { KanbanColumn } from './kanban-column'
 import { createClient } from '@/lib/supabase/client'
 
-const STATUSES: LeadStatus[] = ['to_call', 'contacted', 'demo_sent', 'sold', 'refused']
+const STATUSES: LeadStatus[] = ['to_call', 'contacted', 'demo_sent', 'proposal_sent', 'sold', 'refused']
 
 interface KanbanBoardProps {
   leads: Lead[]

@@ -6,11 +6,12 @@ import type { Lead, LeadStatus } from '@/lib/types/database'
 import { KanbanCard } from './kanban-card'
 
 const COLUMN_CONFIG: Record<LeadStatus, { label: string; color: string }> = {
-  to_call: { label: 'À appeler', color: 'bg-accent' },
-  contacted: { label: 'Contacté', color: 'bg-warning' },
-  demo_sent: { label: 'Démo envoyée', color: 'bg-purple-500' },
-  sold: { label: 'Vendu', color: 'bg-success' },
-  refused: { label: 'Refus', color: 'bg-danger' },
+  to_call:       { label: 'À appeler',    color: 'bg-accent' },
+  contacted:     { label: 'Contacté',     color: 'bg-warning' },
+  demo_sent:     { label: 'Démo envoyée', color: 'bg-purple-500' },
+  proposal_sent: { label: 'Proposition',  color: 'bg-cyan-500' },
+  sold:          { label: 'Vendu',        color: 'bg-success' },
+  refused:       { label: 'Refus',        color: 'bg-danger' },
 }
 
 interface KanbanColumnProps {
